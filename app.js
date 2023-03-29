@@ -2,8 +2,24 @@ const https = require("https");
 const express = require("express");
 const { Configuration, OpenAIApi } = require("openai");
 const app = express();
-const dotenv = require('dotenv');
+const dotenv = require("dotenv");
+const { connectDB } = require("./db");
+const mongoose = require("mongoose");
+const langdetect = require("langdetect");
+
 dotenv.config();
+
+// connect to mongo
+connectDB();
+
+const dictationsSchema = new mongoose.Schema({
+  ko: { type: String },
+  th: { type: String },
+  en: { type: String },
+  example: { type: String },
+});
+
+const dictations = mongoose.model("dictations", dictationsSchema);
 
 const TOKEN = process.env.TOKEN;
 const configuration = new Configuration({
@@ -18,8 +34,23 @@ app.use(
   })
 );
 
-app.get("/", (req, res) => {
+app.get("/", async (req, res) => {
   res.sendStatus(200);
+});
+
+app.post("/test", async (req, res) => {
+  try {
+    const lan = langdetect.detect(req.body.word);
+    const filterLanguage = lan[0].lang === "th" ? "th" : "ko";
+    const filter = {
+      [filterLanguage]: req.body.word,
+    };
+    const dict = await dictations.find(filter);
+    console.log(dict);
+    res.sendStatus(200);
+  } catch (error) {
+    console.error(error);
+  }
 });
 
 app.post("/webhook", async (req, res) => {
@@ -29,22 +60,76 @@ app.post("/webhook", async (req, res) => {
     // Message data, must be stringified
 
     const prompt = req.body.events[0].message.text;
+    const firstletter = prompt.charAt(0);
     try {
-      const response = await openai.createChatCompletion({
-        model: "gpt-3.5-turbo",
-        messages: [{role: "user", content: prompt}],
-      });
+      let messages = [];
+      if (firstletter === "?") {
+        const response = await openai.createChatCompletion({
+          model: "gpt-3.5-turbo",
+          messages: [
+            {
+              role: "user",
+              content: prompt.substring(1),
+            },
+          ],
+        });
 
-      const message = response.data.choices[0].message.content.trim();
+        messages = [
+          {
+            type: "text",
+            text: response.data.choices[0].message.content.trim(),
+          },
+        ];
+      } else {
+        const lan = langdetect.detect(prompt);
 
-      const dataString = JSON.stringify({
-        replyToken: req.body.events[0].replyToken,
-        messages: [
+        let filterLang = "en";
+
+        if (lan[0].lang === "ko" || lan[0].lang === "th") {
+          filterLang = lan[0].lang;
+        }
+
+        const filter = {
+          [filterLang]: prompt,
+        };
+        const dict = await dictations.findOne(filter);
+        const message = `find ${prompt} \n ------ \n th: ${dict.th} \n ko: ${dict.ko} \n en: ${dict.en}`;
+
+        let example = dict.example;
+
+        if (dict.example === "") {
+          const response = await openai.createChatCompletion({
+            model: "gpt-3.5-turbo",
+            messages: [
+              {
+                role: "user",
+                content: `Example 3 korean sentence that use ${dict.ko} and translate to english and thai.`,
+              },
+            ],
+          });
+
+          example = response.data.choices[0].message.content.trim();
+          await dictations.findByIdAndUpdate(
+            { _id: dict._id },
+            { example: example }
+          );
+        }
+
+        messages = [
           {
             type: "text",
             text: message,
           },
-        ],
+          {
+            type: "text",
+            text: example,
+          },
+        ];
+      }
+
+      const dataString = JSON.stringify({
+        replyToken: req.body.events[0].replyToken,
+        messages: messages,
       });
 
       // Request header
