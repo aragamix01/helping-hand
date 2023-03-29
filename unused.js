@@ -4,7 +4,7 @@ const bodyParser = require("body-parser");
 const { Configuration, OpenAIApi } = require("openai");
 const dotenv = require("dotenv");
 dotenv.config();
-
+console.log('eeiei');
 const configuration = new Configuration({
   apiKey: process.env.APIKEY,
 });
