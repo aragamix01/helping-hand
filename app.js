@@ -2,22 +2,27 @@ const https = require("https");
 const express = require("express");
 const { Configuration, OpenAIApi } = require("openai");
 const app = express();
+const cors = require("cors");
 const dotenv = require("dotenv");
 const { connectDB } = require("./db");
 const mongoose = require("mongoose");
 const langdetect = require("langdetect");
 
+app.use(cors());
 dotenv.config();
 
 // connect to mongo
 connectDB();
 
-const dictationsSchema = new mongoose.Schema({
-  ko: { type: String },
-  th: { type: String },
-  en: { type: String },
-  example: { type: String },
-});
+const dictationsSchema = new mongoose.Schema(
+  {
+    ko: { type: String },
+    th: { type: String },
+    en: { type: String },
+    example: { type: String },
+  },
+  { versionKey: false }
+);
 
 const dictations = mongoose.model("dictations", dictationsSchema);
 
@@ -53,6 +58,19 @@ app.post("/test", async (req, res) => {
   }
 });
 
+app.get("/list", async (req, res) => {
+  try {
+    const dict = await dictations.find({});
+    const response = {
+      data: dict,
+    };
+
+    res.send(response);
+  } catch (error) {
+    console.error(error);
+  }
+});
+
 app.post("/webhook", async (req, res) => {
   res.send("HTTP POST request sent to the webhook URL!");
   // If the user sends a message to your bot, send a reply message
@@ -78,6 +96,22 @@ app.post("/webhook", async (req, res) => {
           {
             type: "text",
             text: response.data.choices[0].message.content.trim(),
+          },
+        ];
+      } else if (firstletter === "+") {
+        word = prompt.split("/");
+
+        await dictations.create({
+          ko: word[1],
+          th: word[2],
+          en: word[3],
+          example: "",
+        });
+
+        messages = [
+          {
+            type: "text",
+            text: "Add data success.",
           },
         ];
       } else {
